@@ -1,0 +1,13 @@
+{
+  "name": "hedera-contract-test",
+  "version": "1.0.0",
+  "scripts": {
+    "test": "node test_hedera_arrays.js",
+    "deploy": "node deploy_simple.js"
+  },
+  "dependencies": {
+    "ethers": "^6.0.0",
+    "@hashgraph/sdk": "^2.40.0",
+    "dotenv": "^16.0.0"
+  }
+}

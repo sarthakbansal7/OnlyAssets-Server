@@ -33,10 +33,26 @@ const userSchema = new mongoose.Schema({
     minlength: [6, 'Password must be at least 6 characters long'],
     select: false // Don't include password in queries by default
   },
-  role: {
+  roles: [{
     type: String,
-    enum: ['user', 'issuer', 'admin'],
-    default: 'user'
+    enum: ['admin', 'issuer', 'manager', 'user'],
+    required: true
+  }],
+  walletAddress: {
+    type: String,
+    required: [true, 'Wallet address is required'],
+    unique: true,
+    lowercase: true,
+    trim: true,
+    match: [
+      /^0x[a-fA-F0-9]{40}$/,
+      'Please provide a valid Ethereum wallet address'
+    ]
+  },
+  primaryRole: {
+    type: String,
+    enum: ['admin', 'issuer', 'manager', 'user'],
+    required: true
   },
   isVerified: {
     type: Boolean,
@@ -103,6 +119,8 @@ const userSchema = new mongoose.Schema({
 
 // Index for better query performance
 userSchema.index({ email: 1 });
+userSchema.index({ walletAddress: 1 });
+userSchema.index({ roles: 1 });
 userSchema.index({ createdAt: -1 });
 
 // Pre-save middleware to hash password
@@ -134,6 +152,39 @@ userSchema.methods.updateLastLogin = function() {
 // Static method to find user by email
 userSchema.statics.findByEmail = function(email) {
   return this.findOne({ email: email.toLowerCase() });
+};
+
+// Static method to find user by wallet address
+userSchema.statics.findByWallet = function(walletAddress) {
+  return this.findOne({ walletAddress: walletAddress.toLowerCase() });
+};
+
+// Static method to check if wallet exists for specific role
+userSchema.statics.checkWalletRoleConflict = async function(walletAddress, role) {
+  const existingUser = await this.findOne({ 
+    walletAddress: walletAddress.toLowerCase(),
+    roles: role 
+  });
+  return existingUser;
+};
+
+// Instance method to add role
+userSchema.methods.addRole = function(role) {
+  if (!this.roles.includes(role)) {
+    this.roles.push(role);
+  }
+  return this.save();
+};
+
+// Instance method to remove role
+userSchema.methods.removeRole = function(role) {
+  this.roles = this.roles.filter(r => r !== role);
+  return this.save();
+};
+
+// Instance method to check if user has role
+userSchema.methods.hasRole = function(role) {
+  return this.roles.includes(role);
 };
 
 // Virtual for full name
