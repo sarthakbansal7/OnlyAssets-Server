@@ -2,19 +2,28 @@ const jwt = require('jsonwebtoken');
 const User = require('../models/authSchema');
 const bcrypt = require('bcryptjs');
 
-// Generate JWT Token
-const generateToken = (userId) => {
+// Generate JWT Token with roles
+const generateToken = (userId, roles, primaryRole) => {
   return jwt.sign(
-    { userId },
+    { 
+      userId, 
+      roles, 
+      primaryRole 
+    },
     process.env.JWT_SECRET || 'your-super-secret-jwt-key',
     { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
   );
 };
 
-// Generate JWT Token with role
-const generateTokenWithRole = (userId, role) => {
+// Generate JWT Token with role and roles
+const generateTokenWithRole = (userId, roles, primaryRole, currentRole) => {
   return jwt.sign(
-    { userId, currentRole: role },
+    { 
+      userId, 
+      roles, 
+      primaryRole, 
+      currentRole 
+    },
     process.env.JWT_SECRET || 'your-super-secret-jwt-key',
     { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
   );
@@ -74,15 +83,6 @@ const register = async (req, res) => {
       });
     }
 
-    // Check if wallet is already used for this specific role
-    const existingUserByWalletRole = await User.checkWalletRoleConflict(walletAddress, role);
-    if (existingUserByWalletRole) {
-      return res.status(409).json({
-        success: false,
-        message: `Wallet address is already registered for ${role} role`
-      });
-    }
-
     // Check if wallet exists with other roles (allowed)
     const existingUserByWallet = await User.findByWallet(walletAddress);
     
@@ -90,8 +90,8 @@ const register = async (req, res) => {
       // Wallet exists with other roles, add new role to existing user
       await existingUserByWallet.addRole(role);
       
-      // Generate token
-      const token = generateToken(existingUserByWallet._id);
+      // Generate token with updated roles
+      const token = generateToken(existingUserByWallet._id, existingUserByWallet.roles, existingUserByWallet.primaryRole);
       
       // Update last login
       await existingUserByWallet.updateLastLogin();
@@ -123,8 +123,8 @@ const register = async (req, res) => {
 
     await newUser.save();
 
-    // Generate token
-    const token = generateToken(newUser._id);
+    // Generate token with roles
+    const token = generateToken(newUser._id, newUser.roles, newUser.primaryRole);
 
     // Update last login
     await newUser.updateLastLogin();
@@ -161,7 +161,7 @@ const register = async (req, res) => {
       const field = Object.keys(error.keyPattern)[0];
       return res.status(409).json({
         success: false,
-        message: `${field === 'walletAddress' ? 'Wallet address' : 'Email'} already exists`
+        message: `Email already exists`
       });
     }
 
@@ -247,7 +247,7 @@ const login = async (req, res) => {
     }
 
     // Generate token with role information
-    const token = generateTokenWithRole(user._id, currentRole);
+    const token = generateTokenWithRole(user._id, user.roles, user.primaryRole, currentRole);
 
     // Update last login
     await user.updateLastLogin();
@@ -448,18 +448,6 @@ const createUserByAdmin = async (req, res) => {
       });
     }
 
-    // Check if wallet address already exists for this role
-    const existingUserByWallet = await User.findOne({ 
-      walletAddress, 
-      roles: role 
-    });
-    if (existingUserByWallet) {
-      return res.status(409).json({
-        success: false,
-        message: `Wallet address already registered as ${role}`
-      });
-    }
-
     // Hash password
     const saltRounds = 12;
     const hashedPassword = await bcrypt.hash(password, saltRounds);
@@ -479,8 +467,8 @@ const createUserByAdmin = async (req, res) => {
 
     await newUser.save();
 
-    // Generate token for the new user
-    const token = generateTokenWithRole(newUser._id, role);
+    // Generate token for the new user with roles
+    const token = generateTokenWithRole(newUser._id, newUser.roles, newUser.primaryRole, role);
 
     // Determine dashboard route
     let dashboardRoute = '/dashboard';
@@ -533,7 +521,7 @@ const createUserByAdmin = async (req, res) => {
       const field = Object.keys(error.keyPattern)[0];
       return res.status(409).json({
         success: false,
-        message: `${field === 'walletAddress' ? 'Wallet address' : 'Email'} already exists`
+        message: `Email already exists`
       });
     }
 
@@ -544,11 +532,162 @@ const createUserByAdmin = async (req, res) => {
   }
 };
 
+// Switch user role
+const switchRole = async (req, res) => {
+  try {
+    const { newRole } = req.body;
+
+    if (!newRole) {
+      return res.status(400).json({
+        success: false,
+        message: 'New role is required'
+      });
+    }
+
+    const user = await User.findById(req.userId);
+    
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    // Check if user has the requested role
+    if (!user.hasRole(newRole)) {
+      return res.status(403).json({
+        success: false,
+        message: `You do not have ${newRole} role access`,
+        availableRoles: user.roles
+      });
+    }
+
+    // Generate new token with the new current role
+    const token = generateTokenWithRole(user._id, user.roles, user.primaryRole, newRole);
+
+    // Determine dashboard route based on role
+    const dashboardRoutes = {
+      admin: '/admin',
+      issuer: '/issuer',
+      manager: '/manager-dashboard',
+      user: '/dashboard'
+    };
+
+    res.status(200).json({
+      success: true,
+      message: `Successfully switched to ${newRole} role`,
+      data: {
+        user: user.toJSON(),
+        token,
+        currentRole: newRole,
+        availableRoles: user.roles,
+        dashboardRoute: dashboardRoutes[newRole]
+      }
+    });
+
+  } catch (error) {
+    console.error('Switch role error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error during role switch'
+    });
+  }
+};
+
+// Get user roles
+const getUserRoles = async (req, res) => {
+  try {
+    const user = await User.findById(req.userId);
+    
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: {
+        availableRoles: user.roles,
+        currentRole: req.currentRole,
+        primaryRole: user.primaryRole,
+        hasMultipleRoles: user.roles.length > 1
+      }
+    });
+
+  } catch (error) {
+    console.error('Get user roles error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+};
+
+// Verify wallet address
+const verifyWallet = async (req, res) => {
+  try {
+    const { walletAddress } = req.body;
+
+    if (!walletAddress) {
+      return res.status(400).json({
+        success: false,
+        message: 'Wallet address is required'
+      });
+    }
+
+    // Validate wallet address format
+    const walletRegex = /^0x[a-fA-F0-9]{40}$/;
+    if (!walletRegex.test(walletAddress)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid wallet address format'
+      });
+    }
+
+    const user = await User.findByWallet(walletAddress);
+    
+    if (user) {
+      res.status(200).json({
+        success: true,
+        data: {
+          walletExists: true,
+          availableRoles: user.roles,
+          userInfo: {
+            firstName: user.firstName,
+            lastName: user.lastName,
+            email: user.email
+          }
+        }
+      });
+    } else {
+      res.status(200).json({
+        success: true,
+        data: {
+          walletExists: false,
+          availableRoles: []
+        }
+      });
+    }
+
+  } catch (error) {
+    console.error('Verify wallet error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error during wallet verification'
+    });
+  }
+};
+
 module.exports = {
   register,
   login,
   getProfile,
   updateProfile,
   logout,
-  createUserByAdmin
+  createUserByAdmin,
+  switchRole,
+  getUserRoles,
+  verifyWallet
 };

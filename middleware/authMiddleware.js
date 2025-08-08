@@ -32,7 +32,9 @@ const authMiddleware = async (req, res, next) => {
     // Add user info to request
     req.userId = user._id;
     req.user = user;
-    req.currentRole = decoded.currentRole || user.primaryRole;
+    req.userRoles = decoded.roles || user.roles;
+    req.primaryRole = decoded.primaryRole || user.primaryRole;
+    req.currentRole = decoded.currentRole || decoded.primaryRole || user.primaryRole;
     
     next();
   } catch (error) {

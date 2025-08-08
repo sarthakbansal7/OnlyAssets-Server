@@ -41,7 +41,6 @@ const userSchema = new mongoose.Schema({
   walletAddress: {
     type: String,
     required: [true, 'Wallet address is required'],
-    unique: true,
     lowercase: true,
     trim: true,
     match: [
@@ -157,15 +156,6 @@ userSchema.statics.findByEmail = function(email) {
 // Static method to find user by wallet address
 userSchema.statics.findByWallet = function(walletAddress) {
   return this.findOne({ walletAddress: walletAddress.toLowerCase() });
-};
-
-// Static method to check if wallet exists for specific role
-userSchema.statics.checkWalletRoleConflict = async function(walletAddress, role) {
-  const existingUser = await this.findOne({ 
-    walletAddress: walletAddress.toLowerCase(),
-    roles: role 
-  });
-  return existingUser;
 };
 
 // Instance method to add role
