@@ -45,4 +45,13 @@ router.get('/health', (req, res) => {
   });
 });
 
+// Ping route to keep server alive
+router.get('/ping', (req, res) => {
+  res.status(200).json({
+    success: true,
+    message: 'Server is alive',
+    timestamp: new Date().toISOString()
+  });
+});
+
 module.exports = router;
